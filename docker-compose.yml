@@ -1,5 +1,6 @@
 services:
   gares_bot:
+    image: ghcr.io/tarbib/ubiquitous-doodle/gares_bot:latest
     build: .
     container_name: gares_bot
     restart: unless-stopped
@@ -9,8 +10,6 @@ services:
       - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
       - TZ=${TZ:-Europe/Paris}
     volumes:
-      # Les suivis en cours vivent ici : sans ce volume, une alerte promise
-      # disparaîtrait au premier redéploiement.
       - ./data:/app/data
     security_opt:
       - no-new-privileges:true
