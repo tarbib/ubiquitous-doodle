@@ -7,7 +7,7 @@ la décision d'interface qui la justifie.
 
 ## Le parcours
 
-```
+```text
 1  gare        « rennes »                    → désambiguïsation si besoin
 2  jour        [Aujourd'hui] [Demain] [Autre date]
 3  tableau     6 départs, un bouton par train
@@ -53,17 +53,38 @@ et seulement à partir de 3 min — la gigue d'une minute ne réveille personne.
 tâches reprogrammées : sans cela, une alerte promise disparaîtrait au premier
 `docker compose up`.
 
-## Mise en route
+## Mise en route & Déploiement
 
-1. Token API SNCF (gratuit) : https://numerique.sncf.com/startup/api/token-developpeur/
-   150 000 requêtes/mois, 5 000/jour. Compter 5 min avant qu'il soit actif.
-2. Bot Telegram : @BotFather → `/newbot`.
-3. ```bash
-   cp .env.example .env      # TELEGRAM_TOKEN et SNCF_TOKEN
+L'architecture est unifiée avec un seul fichier `docker-compose.yml` conçu pour le développement local et la production sur VPS (via le GitHub Container Registry).
+
+### 1. Prérequis et Configuration
+1. **Token API SNCF (gratuit)** : https://numerique.sncf.com/startup/api/token-developpeur/
+   (150 000 requêtes/mois, 5 000/jour. Compter 5 min avant qu'il soit actif).
+2. **Bot Telegram** : @BotFather → `/newbot`.
+3. **Variables d'environnement** :
+   ```bash
+   cp .env.example .env
    chmod 600 .env
-   docker compose up -d --build
-   docker compose logs -f
    ```
+   Renseignez `TELEGRAM_TOKEN` et `SNCF_TOKEN` dans le fichier `.env`. Vous pouvez aussi y définir `ALLOWED_USER_IDS` (pour restreindre l'usage à certains comptes) et `TZ` (fuseau horaire par défaut : Europe/Paris).
+
+### 2. Lancement en Local (Développement)
+Le fichier `docker-compose.yml` intègre une directive `build: .` pour compiler automatiquement votre code à la volée.
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+### 3. Lancement en Production (VPS)
+Le projet est pensé pour être déployé via GitHub Actions. À chaque push, une image Docker est compilée et poussée sur le GHCR (`ghcr.io/votre-compte/gares_bot`).
+Sur votre serveur, utilisez le même fichier `docker-compose.yml`. Grâce à la directive `image:`, exécutez simplement :
+```bash
+# Télécharge la dernière version compilée depuis le registre
+docker compose pull
+
+# Relance le bot en conservant les données (state.json) via le volume local
+docker compose up -d
+```
 
 ## Commandes
 
@@ -101,7 +122,7 @@ arriver — d'où `ALLOWED_USER_IDS`.
 
 ## Sécurité
 
-Lecture seule sur donnée publique. Deux règles tenues :
+Lecture seule sur donnée publique. Le bot applique les standards de sécurité Docker en production (`cap_drop`, `no-new-privileges`) et suit deux règles de code :
 
 - Le `SNCF_TOKEN` ne quitte pas le conteneur ; les logs `httpx` sont en
   `WARNING`, car les URLs appelées transiteraient par les journaux.
