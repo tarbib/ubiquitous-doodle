@@ -749,8 +749,9 @@ async def on_button(update: Update, ctx):
             await q.answer("Enregistrement impossible.", show_alert=True)
             await q.message.chat.send_message(
                 "⚠️ Je n'ai pas pu enregistrer ce suivi : le stockage n'est pas "
-                "accessible en écriture.\n<i>Le volume ./data doit appartenir à "
-                "l'UID 10001 — voir le README.</i>", parse_mode=ParseMode.HTML)
+                "accessible en écriture.\n<i>Voir les logs du conteneur pour le "
+                "détail — le volume ./data reste inscriptible en temps normal.</i>",
+                parse_mode=ParseMode.HTML)
             return
         schedule_watch(ctx.job_queue, uid, key)
 
@@ -800,7 +801,10 @@ def storage_ok() -> bool:
         logger.error("STOCKAGE NON INSCRIPTIBLE : %s", e)
         logger.error("Répertoire : %s", STATE_FILE.parent)
         logger.error("Les suivis ne seront pas enregistrés et /suivis restera vide.")
-        logger.error("Correctif : mkdir -p data && sudo chown -R 10001:10001 data")
+        logger.error("L'entrypoint corrige normalement ce cas au démarrage (chown "
+                      "automatique) — si l'erreur persiste, le montage hôte est "
+                      "probablement en lecture seule ou restreint (SELinux, "
+                      "userns-remap...).")
         logger.error("=" * 70)
         return False
 
