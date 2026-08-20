@@ -11,6 +11,4 @@ COPY gares_bot.py .
 
 RUN mkdir -p /app/data && chown -R botuser:botuser /app
 
-USER botuser
-
 CMD ["python", "gares_bot.py"]

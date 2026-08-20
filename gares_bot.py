@@ -90,31 +90,44 @@ def load_state() -> dict:
         return {}
 
 
-def save_state(data: dict):
+def save_state(data: dict) -> bool:
+    """Renvoie False si l'état n'a pas pu être écrit.
+
+    Un bot qui promet « je te préviens » doit savoir s'il a bien enregistré la
+    promesse : une écriture qui échoue en silence donne une confirmation
+    mensongère, et le suivi disparaît au premier /suivis.
+    """
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp = STATE_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
         tmp.replace(STATE_FILE)
+        return True
     except OSError as e:
-        logger.error("Sauvegarde impossible : %s", e)
+        logger.error("SAUVEGARDE IMPOSSIBLE (%s) : %s — vérifie les droits sur %s",
+                     type(e).__name__, e, STATE_FILE.parent)
+        return False
 
 
 def user_entry(uid: int) -> dict:
     return load_state().get(str(uid), {})
 
 
-def user_update(uid: int, **fields):
+def user_update(uid: int, **fields) -> bool:
     state = load_state()
     state[str(uid)] = {**state.get(str(uid), {}), **fields}
-    save_state(state)
+    return save_state(state)
 
 
 def get_watches(uid: int) -> dict:
     w = user_entry(uid).get("watches", {})
-    for v in w.values():
+    # Un état partiel (écriture interrompue, édition manuelle du fichier) ne
+    # doit pas faire planter /suivis : les entrées incomplètes sont ignorées.
+    clean = {k: v for k, v in w.items()
+             if isinstance(v, dict) and {"sid", "station", "num", "sched"} <= v.keys()}
+    for v in clean.values():
         _names.setdefault(v["sid"], v["station"])
-    return w
+    return clean
 
 
 def get_recents(uid: int) -> list[dict]:
@@ -492,11 +505,23 @@ async def watch_tick(ctx: ContextTypes.DEFAULT_TYPE):
 
     label = f"{html.escape(w['mode'])} {html.escape(w['num'])}"
 
+    # Ce que la tâche a DÉJÀ signalé. Cet état vit en mémoire et non sur disque :
+    # si l'écriture échoue, l'anti-répétition doit tenir quand même, sinon la
+    # même alerte repart toutes les trois minutes.
+    mem = ctx.job.data.setdefault("mem", {})
+
+    def remember(**fields):
+        mem.update(fields)
+        w.update(fields)
+        watches = get_watches(uid)
+        if key in watches:                       # persistance au mieux
+            watches[key] = w
+            user_update(uid, watches=watches)
+
     if not found:
         # Une disparition n'est pas une preuve de suppression : on le dit ainsi.
-        if mins < 30 and not w.get("gone"):
-            w["gone"] = True
-            watches = get_watches(uid); watches[key] = w; user_update(uid, watches=watches)
+        if mins < 30 and not mem.get("gone", w.get("gone")):
+            remember(gone=True)
             await notify(f"❓ <b>{label}</b> n'apparaît plus au tableau de "
                          f"{html.escape(w['station'])}.\n"
                          "<i>Souvent le signe d'une suppression — à confirmer en gare.</i>"
@@ -504,11 +529,9 @@ async def watch_tick(ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     delay = found["delay"]
-    known = w.get("delay", 0)
+    known = mem.get("delay", w.get("delay", 0))
     if delay != known and (delay >= ALERT_MIN or known >= ALERT_MIN):
-        w["delay"] = delay
-        w["gone"] = False
-        watches = get_watches(uid); watches[key] = w; user_update(uid, watches=watches)
+        remember(delay=delay, gone=False)
         if delay < ALERT_MIN:
             await notify(f"🟢 <b>{label}</b> est de nouveau à l'heure — "
                          f"départ à <b>{found['real']:%H:%M}</b>.")
@@ -720,7 +743,15 @@ async def on_button(update: Update, ctx):
             return
         w["chat_id"] = q.message.chat_id
         watches[key] = w
-        user_update(uid, watches=watches)
+        if not user_update(uid, watches=watches):
+            # Sans persistance, l'alerte ne survivrait pas au redemarrage et
+            # /suivis afficherait une liste vide : mieux vaut le dire.
+            await q.answer("Enregistrement impossible.", show_alert=True)
+            await q.message.chat.send_message(
+                "⚠️ Je n'ai pas pu enregistrer ce suivi : le stockage n'est pas "
+                "accessible en écriture.\n<i>Le volume ./data doit appartenir à "
+                "l'UID 10001 — voir le README.</i>", parse_mode=ParseMode.HTML)
+            return
         schedule_watch(ctx.job_queue, uid, key)
 
         sched = parse_dt(w["sched"])
@@ -740,10 +771,12 @@ async def on_button(update: Update, ctx):
         key = parts[1]
         watches = get_watches(uid)
         w = watches.pop(key, None)
-        user_update(uid, watches=watches)
+        saved = user_update(uid, watches=watches)
+        # La tâche est arrêtée dans tous les cas : mieux vaut un suivi perdu
+        # qu'une alerte qu'on ne peut plus faire taire.
         if ctx.job_queue:
             cancel_watch(ctx.job_queue, uid, key)
-        await q.answer("Suivi arrêté")
+        await q.answer("Suivi arrêté" if saved else "Arrêté (non enregistré)")
         if w:
             sched = parse_dt(w["sched"])
             await say(q, format_train(w, {"delay": w.get("delay", 0), "real": sched}), True,
@@ -754,7 +787,26 @@ async def on_button(update: Update, ctx):
 
 # ── Démarrage ─────────────────────────────────────────────────────────────────
 
+def storage_ok() -> bool:
+    """Écrit une sonde au démarrage : le défaut se voit tout de suite."""
+    try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        probe = STATE_FILE.parent / ".probe"
+        probe.write_text("ok")
+        probe.unlink()
+        return True
+    except OSError as e:
+        logger.error("=" * 70)
+        logger.error("STOCKAGE NON INSCRIPTIBLE : %s", e)
+        logger.error("Répertoire : %s", STATE_FILE.parent)
+        logger.error("Les suivis ne seront pas enregistrés et /suivis restera vide.")
+        logger.error("Correctif : mkdir -p data && sudo chown -R 10001:10001 data")
+        logger.error("=" * 70)
+        return False
+
+
 async def on_start(app: Application):
+    storage_ok()
     await app.bot.set_my_commands([
         BotCommand("suivis", "Trains que je surveille"),
         BotCommand("start", "Chercher une gare"),
