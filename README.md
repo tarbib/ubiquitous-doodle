@@ -53,6 +53,11 @@ et seulement à partir de 3 min — la gigue d'une minute ne réveille personne.
 tâches reprogrammées : sans cela, une alerte promise disparaîtrait au premier
 `docker compose up`.
 
+**Favoris et récents sont deux listes distinctes.** Les récentes se
+remplissent seules et s'oublient (3 gares) ; un favori est un choix explicite
+et reste jusqu'à ce qu'on le retire. `/start` affiche les favoris en tête,
+étoilés, puis les récentes qui n'y figurent pas déjà.
+
 ## Mise en route & Déploiement
 
 L'architecture est unifiée avec un seul fichier `docker-compose.yml` conçu pour le développement local et la production sur VPS (via le GitHub Container Registry).
@@ -92,7 +97,8 @@ docker compose up -d
 |---|---|
 | *texte libre* | nom d'une gare |
 | `/suivis` | trains surveillés, et bouton pour arrêter |
-| `/start` | recommencer (propose les 3 dernières gares) |
+| `/favoris` | gares favorites, et bouton pour en retirer |
+| `/start` | recommencer (propose les favoris, puis les dernières gares) |
 
 ## Quota
 

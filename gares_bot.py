@@ -47,6 +47,7 @@ CACHE_TTL     = 45
 RATE_LIMIT    = 25
 RATE_WINDOW   = 60
 RECENTS       = 3          # gares récentes proposées au démarrage
+FAVORITES_MAX = 10         # gares favorites : au-delà, la plus ancienne cède la place
 
 WATCH_EVERY   = 180        # cadence de vérification d'un train suivi
 WATCH_FROM    = 90         # minutes avant départ : début des appels API
@@ -141,6 +142,31 @@ def push_recent(uid: int, sid: str, name: str):
     recents = [s for s in get_recents(uid) if s["id"] != sid]
     recents.insert(0, {"id": sid, "name": name})
     user_update(uid, recents=recents[:RECENTS])
+
+
+def get_favorites(uid: int) -> list[dict]:
+    f = user_entry(uid).get("favorites", [])
+    for s in f:
+        _names.setdefault(s["id"], s["name"])
+    return f
+
+
+def is_favorite(uid: int, sid: str) -> bool:
+    return any(s["id"] == sid for s in get_favorites(uid))
+
+
+def toggle_favorite(uid: int, sid: str, name: str) -> bool:
+    """Bascule le statut favori d'une gare. Renvoie l'état après l'appel."""
+    favs = get_favorites(uid)
+    if any(s["id"] == sid for s in favs):
+        user_update(uid, favorites=[s for s in favs if s["id"] != sid])
+        return False
+    # La plus ancienne cède la place plutôt qu'un refus silencieux : le
+    # bouton ★ doit toujours faire ce qu'il annonce.
+    favs = favs[:FAVORITES_MAX - 1]
+    favs.insert(0, {"id": sid, "name": name})
+    user_update(uid, favorites=favs)
+    return True
 
 
 # ── Garde-fous ────────────────────────────────────────────────────────────────
@@ -357,7 +383,7 @@ def day_keyboard(sid: str) -> InlineKeyboardMarkup:
     ])
 
 
-def board_keyboard(sid: str, items: list, from_dt: str) -> InlineKeyboardMarkup:
+def board_keyboard(sid: str, items: list, from_dt: str, is_fav: bool) -> InlineKeyboardMarkup:
     """Un bouton par train, portant son heure et son numéro.
 
     Le bouton dit ce que dit la ligne : aucune référence croisée à faire entre
@@ -380,7 +406,11 @@ def board_keyboard(sid: str, items: list, from_dt: str) -> InlineKeyboardMarkup:
         nxt = (last + timedelta(minutes=1)).strftime("%Y%m%dT%H%M%S")
         nav.append(InlineKeyboardButton("▾ Plus tard", callback_data=f"b|{nxt}|{sid}"))
     rows.append(nav)
-    rows.append([InlineKeyboardButton("📅 Autre jour", callback_data=f"j|{sid}")])
+    rows.append([
+        InlineKeyboardButton("★ Retirer des favoris" if is_fav else "☆ Favori",
+                              callback_data=f"f|{from_dt}|{sid}"),
+        InlineKeyboardButton("📅 Autre jour", callback_data=f"j|{sid}"),
+    ])
     return InlineKeyboardMarkup(rows)
 
 
@@ -414,7 +444,8 @@ async def show_board(target, uid: int, sid: str, from_dt: str, edit: bool = Fals
     name = _names.get(sid, "Gare")
     push_recent(uid, sid, name)
     await say(target, format_board(name, items, from_dt, age), edit,
-              parse_mode=ParseMode.HTML, reply_markup=board_keyboard(sid, items, from_dt))
+              parse_mode=ParseMode.HTML,
+              reply_markup=board_keyboard(sid, items, from_dt, is_favorite(uid, sid)))
     return "Actualisé" if age == 0 else f"Déjà à jour (il y a {age} s)"
 
 
@@ -548,12 +579,35 @@ async def watch_tick(ctx: ContextTypes.DEFAULT_TYPE):
 async def start_command(update: Update, ctx):
     if not allowed(update):
         return
-    recents = get_recents(update.effective_user.id)
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(s["name"][:40], callback_data=f"j|{s['id']}")]
-                               for s in recents]) if recents else None
+    uid = update.effective_user.id
+    favs = get_favorites(uid)
+    fav_ids = {s["id"] for s in favs}
+    recents = [s for s in get_recents(uid) if s["id"] not in fav_ids]
+    rows = [[InlineKeyboardButton(f"★ {s['name'][:38]}", callback_data=f"j|{s['id']}")] for s in favs]
+    rows += [[InlineKeyboardButton(s["name"][:40], callback_data=f"j|{s['id']}")] for s in recents]
+    kb = InlineKeyboardMarkup(rows) if rows else None
     await update.message.reply_text(
         "🚆 Envoie-moi le nom d'une gare.\n\n<i>Rennes · Paris Montparnasse · Lille Flandres</i>",
         parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+def favorites_view(uid: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    favs = get_favorites(uid)
+    if not favs:
+        return ("Aucune gare en favori.\nAffiche une gare, puis touche ☆ Favori.", None)
+    lines = [f"🚉 {html.escape(s['name'])}" for s in favs]
+    rows = [[InlineKeyboardButton(f"★  Retirer « {s['name'][:30]} »", callback_data=f"g|{s['id']}")]
+            for s in favs]
+    text = ("⭐ <b>Gares favorites</b>\n\n" + "\n".join(lines) +
+            "\n\n<i>Retape le nom d'une gare pour l'ouvrir.</i>")
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def favorites_command(update: Update, ctx):
+    if not allowed(update):
+        return
+    text, kb = favorites_view(update.effective_user.id)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 
 async def watches_command(update: Update, ctx):
@@ -724,6 +778,24 @@ async def on_button(update: Update, ctx):
                                               start_of(parse_dt(sched).date())))
         return
 
+    # Favori — bascule depuis le tableau, puis le redessine (coût API nul :
+    # la réponse reste en cache 45 s).
+    if a == "f":
+        from_dt, sid = parts[1], "|".join(parts[2:])
+        fav = toggle_favorite(uid, sid, _names.get(sid, "Gare"))
+        await q.answer("Ajouté aux favoris ★" if fav else "Retiré des favoris")
+        await show_board(q, uid, sid, from_dt, edit=True)
+        return
+
+    # Favori — retrait depuis la liste /favoris
+    if a == "g":
+        sid = "|".join(parts[1:])
+        toggle_favorite(uid, sid, _names.get(sid, "Gare"))
+        await q.answer("Retiré des favoris")
+        text, kb = favorites_view(uid)
+        await say(q, text, True, parse_mode=ParseMode.HTML, reply_markup=kb)
+        return
+
     # Suivre
     if a == "w":
         key = parts[1]
@@ -813,6 +885,7 @@ async def on_start(app: Application):
     storage_ok()
     await app.bot.set_my_commands([
         BotCommand("suivis", "Trains que je surveille"),
+        BotCommand("favoris", "Gares favorites"),
         BotCommand("start", "Chercher une gare"),
     ])
     # Les suivis survivent au redémarrage : sans cela, une alerte promise
@@ -840,6 +913,7 @@ def main():
         CommandHandler("start", start_command),
         CommandHandler("help", start_command),
         CommandHandler("suivis", watches_command),
+        CommandHandler("favoris", favorites_command),
         CallbackQueryHandler(on_button),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
     ])
