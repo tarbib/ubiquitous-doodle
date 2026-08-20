@@ -1,0 +1,23 @@
+services:
+  gares_bot:
+    build: .
+    container_name: gares_bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - SNCF_TOKEN=${SNCF_TOKEN}
+      - ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
+      - TZ=${TZ:-Europe/Paris}
+    volumes:
+      # Les suivis en cours vivent ici : sans ce volume, une alerte promise
+      # disparaîtrait au premier redéploiement.
+      - ./data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
