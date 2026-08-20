@@ -801,10 +801,10 @@ def storage_ok() -> bool:
         logger.error("STOCKAGE NON INSCRIPTIBLE : %s", e)
         logger.error("Répertoire : %s", STATE_FILE.parent)
         logger.error("Les suivis ne seront pas enregistrés et /suivis restera vide.")
-        logger.error("L'entrypoint corrige normalement ce cas au démarrage (chown "
-                      "automatique) — si l'erreur persiste, le montage hôte est "
-                      "probablement en lecture seule ou restreint (SELinux, "
-                      "userns-remap...).")
+        logger.error("Le conteneur tourne en root avec la capacité DAC_OVERRIDE "
+                      "(voir docker-compose.yml) : si l'erreur persiste, le montage "
+                      "hôte est probablement en lecture seule ou restreint "
+                      "(SELinux, userns-remap...).")
         logger.error("=" * 70)
         return False
 

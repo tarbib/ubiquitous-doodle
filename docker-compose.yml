@@ -16,12 +16,10 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      # Nécessaires uniquement à l'entrypoint (root bref) pour chown ./data et
-      # se dégrader vers botuser : le process applicatif final n'en hérite pas,
-      # le kernel efface les capacités au moment du setuid vers un uid non nul.
-      - CHOWN
-      - SETUID
-      - SETGID
+      # Le bot tourne en root dans le conteneur (isolé, sans autre capacité) ;
+      # DAC_OVERRIDE lui permet d'écrire dans ./data quel que soit le
+      # propriétaire côté hôte, sans jonglage d'utilisateur au démarrage.
+      - DAC_OVERRIDE
     logging:
       driver: json-file
       options:
