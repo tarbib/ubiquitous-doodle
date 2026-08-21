@@ -2,9 +2,6 @@
 
 Choisir un train, se faire prévenir en cas de retard.
 
-**Ouvre `prototype.html` avant le code** : six étapes cliquables, chacune avec
-la décision d'interface qui la justifie.
-
 ## Le parcours
 
 ```text
