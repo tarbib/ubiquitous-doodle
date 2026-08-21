@@ -384,7 +384,7 @@ def day_keyboard(sid: str) -> InlineKeyboardMarkup:
 
 
 def board_keyboard(sid: str, items: list, from_dt: str, is_fav: bool) -> InlineKeyboardMarkup:
-    """Un bouton par train, portant son heure et son numéro.
+    """Un bouton par train, portant son heure et sa destination.
 
     Le bouton dit ce que dit la ligne : aucune référence croisée à faire entre
     un tableau et une liste d'index.
@@ -393,7 +393,7 @@ def board_keyboard(sid: str, items: list, from_dt: str, is_fav: bool) -> InlineK
     last = None
     for r in parse_rows(items):
         last = r["real"]
-        label = f"{r['real']:%H:%M}" + (f" · {r['num']}" if r["num"] else "")
+        label = f"{r['real']:%H:%M}" + (f" · {r['dir']}" if r["dir"] else "")
         row.append(InlineKeyboardButton(
             label[:26], callback_data=f"t|{r['base']:%Y%m%dT%H%M%S}|{r['num']}|{sid}"))
         if len(row) == 2:
@@ -788,7 +788,7 @@ async def on_button(update: Update, ctx):
         await show_board(q, uid, sid, from_dt, edit=True)
         return
 
-    # Favori — retrait depuis la liste /favoris
+    # Favori — retrait depuis la liste /gares
     if a == "g":
         sid = "|".join(parts[1:])
         toggle_favorite(uid, sid, _names.get(sid, "Gare"))
@@ -886,7 +886,7 @@ async def on_start(app: Application):
     storage_ok()
     await app.bot.set_my_commands([
         BotCommand("suivis", "Trains que je surveille"),
-        BotCommand("favoris", "Gares favorites"),
+        BotCommand("gares", "Gares favorites"),
         BotCommand("start", "Chercher une gare"),
     ])
     # Les suivis survivent au redémarrage : sans cela, une alerte promise
@@ -914,7 +914,7 @@ def main():
         CommandHandler("start", start_command),
         CommandHandler("help", start_command),
         CommandHandler("suivis", watches_command),
-        CommandHandler("favoris", favorites_command),
+        CommandHandler("gares", favorites_command),
         CallbackQueryHandler(on_button),
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
     ])

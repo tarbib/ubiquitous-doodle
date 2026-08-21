@@ -97,7 +97,7 @@ docker compose up -d
 |---|---|
 | *texte libre* | nom d'une gare |
 | `/suivis` | trains surveillés, et bouton pour arrêter |
-| `/favoris` | gares favorites, et bouton pour en retirer |
+| `/gares` | gares favorites, touche pour ouvrir, 🗑 pour en retirer |
 | `/start` | recommencer (propose les favoris, puis les dernières gares) |
 
 ## Quota
