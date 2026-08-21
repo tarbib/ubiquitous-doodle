@@ -596,10 +596,11 @@ def favorites_view(uid: int) -> tuple[str, InlineKeyboardMarkup | None]:
     if not favs:
         return ("Aucune gare en favori.\nAffiche une gare, puis touche ☆ Favori.", None)
     lines = [f"🚉 {html.escape(s['name'])}" for s in favs]
-    rows = [[InlineKeyboardButton(f"★  Retirer « {s['name'][:30]} »", callback_data=f"g|{s['id']}")]
+    rows = [[InlineKeyboardButton(s["name"][:34], callback_data=f"j|{s['id']}"),
+             InlineKeyboardButton("🗑", callback_data=f"g|{s['id']}")]
             for s in favs]
     text = ("⭐ <b>Gares favorites</b>\n\n" + "\n".join(lines) +
-            "\n\n<i>Retape le nom d'une gare pour l'ouvrir.</i>")
+            "\n\n<i>Touche une gare pour l'ouvrir, 🗑 pour la retirer.</i>")
     return text, InlineKeyboardMarkup(rows)
 
 
