@@ -374,12 +374,14 @@ def format_train(w: dict, live: dict | None) -> str:
 
 # ── Claviers ──────────────────────────────────────────────────────────────────
 
-def day_keyboard(sid: str) -> InlineKeyboardMarkup:
+def day_keyboard(sid: str, is_fav: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Aujourd'hui", callback_data=f"b|{start_of(now_local().date())}|{sid}"),
          InlineKeyboardButton("Demain",
                               callback_data=f"b|{start_of(now_local().date()+timedelta(days=1))}|{sid}")],
         [InlineKeyboardButton("Autre date…", callback_data=f"o|{sid}")],
+        [InlineKeyboardButton("★ Retirer des favoris" if is_fav else "☆ Ajouter aux favoris",
+                              callback_data=f"v|{sid}")],
     ])
 
 
@@ -682,7 +684,7 @@ async def handle_text(update: Update, ctx):
             parse_mode=ParseMode.HTML)
         return
     if len(results) == 1:
-        await ask_day(update.message, results[0]["id"], edit=False)
+        await ask_day(update.message, uid, results[0]["id"], edit=False)
         return
 
     await update.message.reply_text(
@@ -712,9 +714,10 @@ def parse_day(text: str) -> date_cls | None:
     return None
 
 
-async def ask_day(target, sid: str, edit: bool):
+async def ask_day(target, uid: int, sid: str, edit: bool):
     await say(target, f"🚉 <b>{html.escape(_names.get(sid, 'Gare'))}</b>\nQuel jour ?",
-              edit, parse_mode=ParseMode.HTML, reply_markup=day_keyboard(sid))
+              edit, parse_mode=ParseMode.HTML,
+              reply_markup=day_keyboard(sid, is_favorite(uid, sid)))
 
 
 # ── Boutons ───────────────────────────────────────────────────────────────────
@@ -734,7 +737,15 @@ async def on_button(update: Update, ctx):
     # Choix du jour
     if a == "j":
         await q.answer()
-        await ask_day(q, "|".join(parts[1:]), edit=True)
+        await ask_day(q, uid, "|".join(parts[1:]), edit=True)
+        return
+
+    # Favori — bascule depuis l'étape jour, puis redessine ce même clavier.
+    if a == "v":
+        sid = "|".join(parts[1:])
+        fav = toggle_favorite(uid, sid, _names.get(sid, "Gare"))
+        await q.answer("Ajouté aux favoris ★" if fav else "Retiré des favoris")
+        await ask_day(q, uid, sid, edit=True)
         return
 
     if a == "o":
